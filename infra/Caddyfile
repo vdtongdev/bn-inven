@@ -1,0 +1,13 @@
+{$DOMAIN} {
+  encode zstd gzip
+  basic_auth {
+    {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+  }
+  @api path /api/*
+  handle @api {
+    reverse_proxy api:8000
+  }
+  handle {
+    reverse_proxy web:80
+  }
+}

@@ -1,0 +1,26 @@
+# Local environment files and credentials. Keep the example config versioned.
+.env
+.env.*
+!.env.example
+.venv/
+.uv-cache/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+# Pytest creates isolated databases and image fixtures in these directories.
+**/.pytest-tmp*/
+backend/data/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.npm-cache/
+frontend/tsconfig.tsbuildinfo
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pem
+*.key
+.DS_Store
+Thumbs.db
