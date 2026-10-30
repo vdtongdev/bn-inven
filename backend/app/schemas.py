@@ -10,6 +10,7 @@ class ExtractionPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     product_name: str | None = Field(default=None, max_length=240)
+    product_type: str | None = Field(default=None, max_length=160)
     brand: str | None = Field(default=None, max_length=160)
     model_number: str | None = Field(default=None, max_length=120)
     barcode: str | None = Field(default=None, max_length=80)
