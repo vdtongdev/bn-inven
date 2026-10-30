@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -29,8 +29,16 @@ async def save_photo(db: Session, batch: CaptureBatch, upload: UploadFile,
     if not data or len(data) > settings.max_upload_bytes:
         raise HTTPException(413, "Image is empty or exceeds the upload limit")
     digest = hashlib.sha256(data).hexdigest()
-    existing = db.scalar(select(ProductPhoto).where(ProductPhoto.batch_id == batch.id,
-                                                    ProductPhoto.sha256 == digest))
+    existing_query = select(ProductPhoto).where(ProductPhoto.batch_id == batch.id,
+                                                ProductPhoto.sha256 == digest)
+    if draft:
+        # A duplicate image belonging to another product must not redirect this upload.
+        existing_query = existing_query.where(ProductPhoto.draft_id == draft.id)
+    else:
+        # An excluded product stays excluded; a new capture needs a reviewable draft.
+        existing_query = existing_query.outerjoin(ProductDraft, ProductPhoto.draft_id == ProductDraft.id).where(
+            or_(ProductPhoto.draft_id.is_(None), ProductDraft.review_status != ReviewStatus.excluded))
+    existing = db.scalar(existing_query.order_by(ProductPhoto.created_at.desc()))
     if existing:
         job = db.scalar(select(ExtractionJob).where(ExtractionJob.photo_id == existing.id)
                         .order_by(ExtractionJob.created_at.desc()))

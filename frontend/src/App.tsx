@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, apiBase } from './api'
+import { api, apiUrl } from './api'
 import type { Batch, Draft, ExportProfile } from './types'
 
 const fields: { key: keyof Draft; label: string }[] = [
@@ -122,7 +122,7 @@ export default function App() {
     try {
       const profile = profiles[0]
       const result = await api<{ id: string; filename: string }>('/api/exports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: profile.id, draft_ids: approved.map(d => d.id) }) })
-      const response = await fetch(`${apiBase}/api/exports/${result.id}/download`, { credentials: 'include' })
+      const response = await fetch(apiUrl(`/api/exports/${result.id}/download`), { credentials: 'include' })
       if (!response.ok) throw new Error(`Tải file lỗi: HTTP ${response.status}`)
       const url = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = url; link.download = result.filename; link.click(); URL.revokeObjectURL(url)
       setMessage(`Đã tải ${result.filename}. Đây là file DEMO, chưa xác nhận nhập được vào MISA.`)
@@ -149,7 +149,7 @@ export default function App() {
               <div><h3 className="font-semibold">{itemTitle(draft)}</h3><p className="text-xs text-slate-500">Mã BN: {draft.item_code}</p></div>
               <span className="status">{draft.review_status}</span>
             </div>
-            {(draft.photo_ids?.length ? draft.photo_ids : draft.photo_id ? [draft.photo_id] : []).map(photoId => <img key={photoId} className="mb-3 max-h-56 w-full rounded-lg object-contain bg-slate-100" src={`${apiBase}/api/photos/${photoId}/image`} alt="Ảnh nhãn sản phẩm" />)}
+            {(draft.photo_ids?.length ? draft.photo_ids : draft.photo_id ? [draft.photo_id] : []).map(photoId => <img key={photoId} className="mb-3 max-h-56 w-full rounded-lg object-contain bg-slate-100" src={apiUrl(`/api/photos/${photoId}/image`)} alt="Ảnh nhãn sản phẩm" />)}
             {draft.duplicate_suggestion && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Phát hiện trùng {draft.duplicate_suggestion.kind === 'exact_barcode' ? 'mã vạch' : 'mã model'} với {draft.duplicate_suggestion.scope === 'catalog' ? 'danh mục đã duyệt' : 'bản nháp khác'} ({draft.duplicate_suggestion.item_code}). Cần người dùng xác nhận; hệ thống chưa gộp sản phẩm.</p>}
             {draft.extraction && <p className="mb-3 text-xs text-slate-500">Nguồn: {draft.extraction.provider} / {draft.extraction.model}. Đề xuất AI cần người xác nhận.</p>}
             <div className="grid gap-2">{fields.map(field => <label className="grid gap-1 text-sm" key={field.key}><span>{field.label}{!draft[field.key] && <span className="ml-1 text-amber-700">· cần kiểm tra</span>}</span><input className="input" value={String(draft[field.key] ?? '')} disabled={draft.review_status === 'Approved'} onChange={e => setDrafts(current => current.map(row => row.id === draft.id ? { ...row, [field.key]: e.target.value } : row))} /></label>)}</div>

@@ -46,9 +46,9 @@ printf 'Applying database migrations...\n'
 (cd "$BACKEND_DIR" && uv run alembic upgrade head)
 
 printf 'Starting API, extraction worker, and PWA. Press Ctrl+C to stop all services.\n'
-printf 'App: http://localhost:5173  API: http://localhost:8000  API docs: http://localhost:8000/docs\n'
+printf 'App: http://localhost:5173  API: http://localhost:8001  API docs: http://localhost:8001/docs\n'
 
-(cd "$BACKEND_DIR" && exec uv run uvicorn app.main:app --reload --reload-dir app --host 0.0.0.0) &
+(cd "$BACKEND_DIR" && exec uv run uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port 8001) &
 SERVICE_PIDS+=("$!")
 (cd "$BACKEND_DIR" && exec uv run python -m app.workers.extraction) &
 SERVICE_PIDS+=("$!")

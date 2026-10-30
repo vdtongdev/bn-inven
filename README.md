@@ -16,7 +16,7 @@ bash ./start-dev.sh
 
 The script checks for `uv`, Node.js, and npm; syncs backend dependencies; installs frontend dependencies if needed; applies Alembic migrations; then starts the API, durable worker, and PWA together. Logs stay in the terminal. Press **Ctrl+C** to stop all three services.
 
-Open <http://localhost:5173>. The API defaults to <http://localhost:8000>; interactive API docs are at <http://localhost:8000/docs>. Vite's `VITE_API_BASE_URL` can point to another API origin.
+Open <http://localhost:5173>. The browser sends API requests to the same origin under `/api`; Vite forwards them to the local backend on port 8001. Interactive API docs are at <http://localhost:8001/docs>. Port 8000 is available for other apps. If port 5173 is occupied, stop the previous BN-Inven instance before starting this checkout; Vite reports the conflict instead of choosing another port. `VITE_API_BASE_URL` can override the API origin or API base path for other deployments.
 
 ## Checks
 

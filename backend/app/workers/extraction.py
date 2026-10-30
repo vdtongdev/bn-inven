@@ -107,6 +107,28 @@ def process_one() -> bool:
                 db.add(draft)
                 db.flush()
                 photo.draft_id = draft.id
+            else:
+                draft = db.get(ProductDraft, photo.draft_id)
+                db.refresh(draft)
+                if draft.review_status == ReviewStatus.excluded:
+                    job.status = JobStatus.failed
+                    job.last_error = "Product was excluded during recognition. Upload the image again to create a new draft."
+                    job.updated_at = now_utc()
+                    db.commit()
+                    return True
+                if draft.review_status != ReviewStatus.approved:
+                    # Keep every result as evidence; expose the latest photo's suggestions.
+                    draft.extraction_result_id = extraction.id
+                    # Once a human edits a draft, AI must not replace even deliberately empty values.
+                    if draft.review_status == ReviewStatus.pending:
+                        for field, value in {
+                            "product_name": payload.product_name, "brand": payload.brand,
+                            "model_number": payload.model_number, "barcode": payload.barcode,
+                            "category_code": payload.category_suggestion,
+                            "primary_unit": payload.unit_suggestion, "package_size": payload.package_size,
+                        }.items():
+                            if not getattr(draft, field):
+                                setattr(draft, field, normalize_text(value))
             job.status = JobStatus.succeeded
             job.last_error = None
             job.updated_at = now_utc()

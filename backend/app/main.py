@@ -85,8 +85,8 @@ async def upload_photo(batch_id: str, file: UploadFile = File(...), draft_id: st
     draft = db.get(ProductDraft, draft_id) if draft_id else None
     if draft_id and (not draft or draft.batch_id != batch.id):
         raise HTTPException(404, "Draft not found in this batch")
-    if draft and draft.review_status == ReviewStatus.approved:
-        raise HTTPException(409, "Approved catalog items cannot receive new photos in this MVP")
+    if draft and draft.review_status in (ReviewStatus.approved, ReviewStatus.excluded):
+        raise HTTPException(409, "Approved or excluded products cannot receive new photos in this MVP")
     photo, job = await save_photo(db, batch, file, draft)
     return {"photo_id": photo.id, "job_id": job.id, "status": job.status.value}
 
@@ -116,10 +116,8 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(ExtractionJob, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    draft = db.scalar(select(ProductDraft).join(ExtractionResult,
-        ProductDraft.extraction_result_id == ExtractionResult.id).where(ExtractionResult.job_id == job.id))
     return {"id": job.id, "status": job.status.value, "attempts": job.attempts,
-            "last_error": job.last_error, "draft_id": draft.id if draft else None}
+            "last_error": job.last_error, "draft_id": job.photo.draft_id}
 
 
 @app.get("/api/drafts/{draft_id}/history", response_model=list[DraftAuditEventOut])
