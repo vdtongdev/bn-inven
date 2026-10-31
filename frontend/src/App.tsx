@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, apiUrl } from './api'
 import type { Batch, Draft, ExportProfile } from './types'
 
@@ -41,7 +41,14 @@ function createInternalBatchOnce() {
 
 export default function App() {
   const [batch, setBatch] = useState<Batch | null>(null)
-  const [drafts, setDrafts] = useState<Draft[]>([])
+  const [serverDrafts, setDrafts] = useState<Draft[]>([])
+  const [edits, setEdits] = useState<Record<string, Partial<Draft>>>({})
+  const refreshVersion = useRef(0)
+  const nextRefreshId = useRef(0)
+  const appliedRefreshId = useRef(0)
+  const pendingSaves = useRef(new Set<string>())
+  const [approvingIds, setApprovingIds] = useState<string[]>([])
+  const drafts = serverDrafts.map(draft => draft.review_status === 'Approved' ? draft : { ...draft, ...edits[draft.id] })
   const [profiles, setProfiles] = useState<ExportProfile[]>([])
   const [online, setOnline] = useState(navigator.onLine)
   const [busy, setBusy] = useState(false)
@@ -49,12 +56,17 @@ export default function App() {
   const [message, setMessage] = useState('')
 
   async function refreshBatches() {
+    const version = refreshVersion.current
+    const refreshId = ++nextRefreshId.current
     const rows = await api<Batch[]>('/api/batches')
     const uploadBatch = rows[0] ?? await createInternalBatchOnce()
     const allBatches = rows.length > 0 ? rows : [uploadBatch]
     setBatch(uploadBatch)
     const draftGroups = await Promise.all(allBatches.map(row => api<Draft[]>(`/api/batches/${row.id}/drafts`)))
-    setDrafts(draftGroups.flat().filter(draft => draft.review_status !== 'Excluded'))
+    if (version === refreshVersion.current && refreshId > appliedRefreshId.current) {
+      appliedRefreshId.current = refreshId
+      setDrafts(draftGroups.flat().filter(draft => draft.review_status !== 'Excluded'))
+    }
   }
   useEffect(() => {
     const onlineHandler = () => setOnline(navigator.onLine)
@@ -94,10 +106,20 @@ export default function App() {
   }
 
   async function saveDraft(draft: Draft, patch: Partial<Draft>) {
+    if (pendingSaves.current.has(draft.id)) return
+    pendingSaves.current.add(draft.id)
     try {
       const updated = await api<Draft>(`/api/drafts/${draft.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
+      refreshVersion.current++
+      setEdits(current => {
+        const remaining = { ...current[draft.id] }
+        for (const key of Object.keys(patch) as (keyof Draft)[]) {
+          if (remaining[key] === patch[key]) delete remaining[key]
+        }
+        return { ...current, [draft.id]: remaining }
+      })
       setDrafts(current => current.map(row => row.id === draft.id ? updated : row)); setMessage('Đã lưu bản nháp.')
-    } catch (e) { setMessage(String(e)) }
+    } catch (e) { setMessage(String(e)) } finally { pendingSaves.current.delete(draft.id) }
   }
   async function removeDraft(draft: Draft) {
     try {
@@ -105,16 +127,25 @@ export default function App() {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ review_status: 'Excluded' }),
       })
+      refreshVersion.current++
       setDrafts(current => current.filter(row => row.id !== draft.id))
       setMessage('Đã loại bỏ sản phẩm khỏi danh sách.')
     } catch (e) { setMessage(String(e)) }
   }
   async function approve(draft: Draft) {
+    if (pendingSaves.current.has(draft.id)) return
+    pendingSaves.current.add(draft.id)
+    setApprovingIds(current => [...current, draft.id])
     try {
       await api<Draft>(`/api/drafts/${draft.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product_name: draft.product_name, brand: draft.brand, model_number: draft.model_number, barcode: draft.barcode, item_type: draft.item_type, category_code: draft.category_code, primary_unit: draft.primary_unit, package_size: draft.package_size }) })
       const updated = await api<Draft>(`/api/drafts/${draft.id}/approve`, { method: 'POST' })
+      refreshVersion.current++
+      setEdits(current => { const remaining = { ...current }; delete remaining[draft.id]; return remaining })
       setDrafts(current => current.map(row => row.id === draft.id ? updated : row)); setMessage('Đã duyệt sản phẩm vào danh mục.')
-    } catch (e) { setMessage(String(e)) }
+    } catch (e) { setMessage(String(e)) } finally {
+      pendingSaves.current.delete(draft.id)
+      setApprovingIds(current => current.filter(id => id !== draft.id))
+    }
   }
   async function exportApproved() {
     const approved = drafts.filter(d => d.review_status === 'Approved')
@@ -152,7 +183,7 @@ export default function App() {
             {(draft.photo_ids?.length ? draft.photo_ids : draft.photo_id ? [draft.photo_id] : []).map(photoId => <img key={photoId} className="mb-3 max-h-56 w-full rounded-lg object-contain bg-slate-100" src={apiUrl(`/api/photos/${photoId}/image`)} alt="Ảnh nhãn sản phẩm" />)}
             {draft.duplicate_suggestion && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Phát hiện trùng {draft.duplicate_suggestion.kind === 'exact_barcode' ? 'mã vạch' : 'mã model'} với {draft.duplicate_suggestion.scope === 'catalog' ? 'danh mục đã duyệt' : 'bản nháp khác'} ({draft.duplicate_suggestion.item_code}). Cần người dùng xác nhận; hệ thống chưa gộp sản phẩm.</p>}
             {draft.extraction && <p className="mb-3 text-xs text-slate-500">Nguồn: {draft.extraction.provider} / {draft.extraction.model}. Đề xuất AI cần người xác nhận.</p>}
-            <div className="grid gap-2">{fields.map(field => <label className="grid gap-1 text-sm" key={field.key}><span>{field.label}{!draft[field.key] && <span className="ml-1 text-amber-700">· cần kiểm tra</span>}</span><input className="input" value={String(draft[field.key] ?? '')} disabled={draft.review_status === 'Approved'} onChange={e => setDrafts(current => current.map(row => row.id === draft.id ? { ...row, [field.key]: e.target.value } : row))} /></label>)}</div>
+            <div className="grid gap-2">{fields.map(field => <label className="grid gap-1 text-sm" key={field.key}><span>{field.label}{!draft[field.key] && <span className="ml-1 text-amber-700">· cần kiểm tra</span>}</span><input className="input" value={String(draft[field.key] ?? '')} disabled={draft.review_status === 'Approved' || approvingIds.includes(draft.id)} onChange={e => { const value = e.target.value; setEdits(current => ({ ...current, [draft.id]: { ...current[draft.id], [field.key]: value } })) }} /></label>)}</div>
             {draft.review_status !== 'Approved' && <>
               <label className="secondary mt-3 flex cursor-pointer justify-center">Thêm ảnh cho sản phẩm<input className="sr-only" type="file" accept="image/*" capture="environment" disabled={busy || !online} onChange={e => void upload(e.target.files?.[0], draft.id)} /></label>
               <button className="secondary mt-2 w-full" onClick={() => void saveDraft(draft, { product_name: draft.product_name, brand: draft.brand, model_number: draft.model_number, barcode: draft.barcode, item_type: draft.item_type, category_code: draft.category_code, primary_unit: draft.primary_unit, package_size: draft.package_size })}>Lưu thay đổi</button>
