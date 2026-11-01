@@ -66,7 +66,7 @@ def test_edit_noop_approval_and_history_are_chronological(monkeypatch):
         assert len(first_history) == 1
         assert first_history[0]["action"] == "edited"
         assert first_history[0]["changes"] == {
-            "product_name": {"before": "AI name", "after": "Human name"},
+            "product_name": {"before": "Ai name", "after": "Human name"},
             "review_status": {"before": "Pending", "after": "NeedsCorrection"},
         }
 

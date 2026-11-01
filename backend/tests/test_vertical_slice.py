@@ -8,6 +8,7 @@ from sqlalchemy import inspect
 from sqlalchemy import create_engine
 
 from app.ai.providers import MockVisionProvider, ProviderResult
+from app.ai.prompts import PROMPT_VERSION
 from app.ai.openrouter import ProviderPermanentError, ProviderTransientError
 from app.db import SessionLocal
 from app.db import engine
@@ -126,7 +127,7 @@ def test_worker_preserves_provider_usage_trace(monkeypatch):
             return ProviderResult(payload, "openrouter", "test-model", {
                 "provider_response": {"usage": {"total_tokens": 17, "cost": 0.001}},
                 "usage": {"total_tokens": 17, "cost": 0.001},
-                "prompt_version": "catalog-v2",
+                "prompt_version": PROMPT_VERSION,
             })
 
     monkeypatch.setattr("app.workers.extraction.get_provider", lambda _name: TracedProvider())
@@ -140,7 +141,7 @@ def test_worker_preserves_provider_usage_trace(monkeypatch):
             trace = db.query(ExtractionResult).filter_by(job_id=uploaded.json()["job_id"]).one()
             assert trace.provider == "openrouter"
             assert trace.model == "test-model"
-            assert trace.prompt_version == "catalog-v2"
+            assert trace.prompt_version == PROMPT_VERSION
             assert trace.raw_response["usage"]["total_tokens"] == 17
             assert trace.raw_response["usage"]["cost"] == 0.001
 

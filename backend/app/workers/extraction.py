@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import or_, select
 
+from app.ai.normalization import normalize_extraction_payload
 from app.ai.openrouter import ProviderPermanentError, ProviderTransientError
 from app.ai.providers import PROMPT_VERSION, get_provider
 from app.core.config import get_settings
@@ -42,7 +43,7 @@ def process_one() -> bool:
         try:
             provider = get_provider(get_settings().ai_provider)
             result = provider.extract(path)
-            payload = result.payload
+            payload = normalize_extraction_payload(result.payload)
             extraction = ExtractionResult(job_id=job.id, photo_id=photo.id,
                 schema_version="extraction-v1", provider=result.provider, model=result.model,
                 prompt_version=PROMPT_VERSION, raw_response=result.raw_response,

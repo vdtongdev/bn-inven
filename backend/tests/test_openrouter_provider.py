@@ -11,6 +11,7 @@ from app.ai.openrouter import (
     ProviderTransientError,
 )
 from app.ai.providers import MockVisionProvider
+from app.ai.prompts import PROMPT_VERSION
 from app.core.config import Settings
 
 
@@ -64,7 +65,7 @@ def test_openrouter_sends_bounded_image_and_preserves_trace_metadata(tmp_path, c
     assert result.provider == "openrouter"
     assert result.model == "nvidia/nemotron-3.5-super-vl:free"
     assert result.raw_response["usage"]["total_tokens"] == 130
-    assert result.raw_response["prompt_version"] == "catalog-v2"
+    assert result.raw_response["prompt_version"] == PROMPT_VERSION
     assert SECRET not in repr(result)
     assert SECRET not in caplog.text
     assert path.read_bytes() == original

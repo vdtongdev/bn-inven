@@ -88,16 +88,58 @@ def test_additional_photo_preserves_human_edits_including_empty_fields(monkeypat
             files={"file": ("front.png", photo_bytes("gold"), "image/png")}).json()
         assert process_one() is True
         draft_id = client.get(f"/api/jobs/{first['job_id']}").json()["draft_id"]
-        assert client.patch(f"/api/drafts/{draft_id}", json={"product_name": "Human name", "brand": None}).status_code == 200
+        assert client.patch(f"/api/drafts/{draft_id}", json={
+            "product_name": "HUMAN iPhone X", "brand": None, "primary_unit": "BOX"
+        }).status_code == 200
         second = client.post(f"/api/batches/{batch['id']}/photos", data={"draft_id": draft_id},
             files={"file": ("back.png", photo_bytes("silver"), "image/png")}).json()
         assert process_one() is True
         assert client.get(f"/api/jobs/{second['job_id']}").json()["draft_id"] == draft_id
         draft = client.get(f"/api/batches/{batch['id']}/drafts").json()[0]
-        assert draft["product_name"] == "Human name"
+        assert draft["product_name"] == "HUMAN iPhone X"
+        assert draft["primary_unit"] == "BOX"
         assert draft["brand"] is None
         assert draft["review_status"] == "NeedsCorrection"
-        assert draft["extraction"]["observed"]["brand"] == "AI brand"
+        assert draft["extraction"]["observed"]["brand"] == "Ai brand"
+
+
+def test_new_ai_results_normalize_drafts_and_observations_but_keep_raw_evidence(monkeypatch):
+    original = {
+        "product_name": "ĐÈN CHIẾU SÁNG", "product_type": "ĐÈN", "brand": "ACME",
+        "unit_suggestion": "BOX", "model_number": "LED-XyZ", "barcode": "AbC0123",
+        "category_suggestion": "CAT_LED", "package_size": "10 kW / 220 V",
+        "attributes": {"serial": "aBcD", "power": 10},
+        "confidence": {"product_name": 0.9},
+    }
+
+    class Provider:
+        def extract(self, _path):
+            return ProviderResult(ExtractionPayload(**original), "test", "mixed-case", original)
+
+    monkeypatch.setattr("app.workers.extraction.get_provider", lambda _name: Provider())
+    with TestClient(app) as client:
+        batch = client.post("/api/batches", json={"name": "AI normalization"}).json()
+        upload = client.post(f"/api/batches/{batch['id']}/photos",
+            files={"file": ("label.png", photo_bytes("lime"), "image/png")}).json()
+        assert process_one() is True
+        draft = client.get(f"/api/batches/{batch['id']}/drafts").json()[0]
+        assert draft["product_name"] == "Đèn chiếu sáng"
+        assert draft["brand"] == "Acme"
+        assert draft["primary_unit"] == "Hộp"
+        assert draft["model_number"] == "LED-XyZ"
+        assert draft["barcode"] == "AbC0123"
+        assert draft["category_code"] == "CAT_LED"
+        assert draft["package_size"] == "10 kW / 220 V"
+        assert draft["review_status"] == "Pending"
+        observed = draft["extraction"]["observed"]
+        assert observed["product_name"] == "Đèn chiếu sáng"
+        assert observed["product_type"] == "Đèn"
+        assert observed["attributes"] == original["attributes"]
+        assert draft["extraction"]["suggestions"]["primary_unit"] == "Hộp"
+        with SessionLocal() as db:
+            result = db.get(ExtractionJob, upload["job_id"]).result
+            assert result.raw_response == original
+            assert result.prompt_version == "catalog-v5"
 
 
 def test_duplicate_photo_is_not_redirected_to_another_product():
