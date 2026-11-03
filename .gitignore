@@ -24,3 +24,5 @@ frontend/tsconfig.tsbuildinfo
 *.key
 .DS_Store
 Thumbs.db
+# Local linked checkouts (including worktrees of other repositories).
+.worktrees/

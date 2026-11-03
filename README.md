@@ -38,3 +38,5 @@ docker compose up -d
 Only Caddy publishes host ports 80/443. It requires HTTP Basic Authentication and terminates HTTPS. API and frontend containers have no direct public port. For Cloudflare Pages, follow the separate access boundary in [deployment.md](docs/deployment.md).
 
 See [architecture](docs/architecture.md), [domain model](docs/domain-model.md), [deployment and backup](docs/deployment.md), and [roadmap](docs/roadmap.md).
+
+For a new machine and the preserved worktree state, see the [remote development handoff](docs/handoff.md).
