@@ -61,9 +61,16 @@ record and does not describe BN-Inven application behavior.
 
 ## Validation boundary
 
-This wrap-up changes documentation and Git bookkeeping only. Current-session
-application checks are reported separately; this document does not claim a
-passing suite or a deployed application. On a fresh machine, run backend tests
-from `backend` with `uv run pytest`, and frontend checks from `frontend` with
-`npm test` and `npm run build`. A successful workbook download remains a
-GENERIC / DEMO export, not proof of MISA import compatibility.
+This wrap-up changes documentation and Git bookkeeping only. Checks run in WSL
+on 2026-11-03 produced these results:
+
+- Backend `uv sync --extra dev && uv run pytest -q`: 64 passed, 6 warnings.
+- Frontend `npm run build`: passed.
+- Frontend `npm test`: 11 passed, 2 failed. `src/App.test.tsx` still expects
+  the removed `Tạo lô` button. `src/live-dev-server.test.ts` could not connect
+  to port 5173 because no development server was running.
+
+These checks do not verify deployment or a fresh-machine startup. On a fresh
+machine, run backend tests from `backend` with `uv run pytest`, and frontend
+checks from `frontend` with `npm test` and `npm run build`. A successful workbook
+download remains a GENERIC / DEMO export, not proof of MISA import compatibility.
