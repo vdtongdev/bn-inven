@@ -25,10 +25,14 @@ for command_name in git flock docker; do
 done
 
 mkdir -p "$STATE_DIR"
-exec 9>"$STATE_DIR/deploy.lock"
-if ! flock -n 9; then
-  log "Another deploy is running; skipping."
-  exit 0
+# A re-executed copy (see below) inherits fd 9 and its lock, so it must not lock again.
+if [[ -z "${BN_DEPLOY_LOCKED:-}" ]]; then
+  exec 9>"$STATE_DIR/deploy.lock"
+  if ! flock -n 9; then
+    log "Another deploy is running; skipping."
+    exit 0
+  fi
+  export BN_DEPLOY_LOCKED=1
 fi
 
 cd "$APP_DIR"
@@ -50,8 +54,16 @@ fi
 
 previous="${deployed:0:7}"
 log "Deploying ${target:0:7} (previous: ${previous:-none})."
+before="$(git rev-parse HEAD)"
 git merge --ff-only --quiet "origin/$BRANCH" \
   || die "origin/$BRANCH cannot be fast-forwarded. Production never merges or rebases; inspect the checkout."
+
+# Bash keeps running the copy of this script it opened, not the one just pulled.
+# Restart once so changes to the deploy steps apply to this deploy.
+if [[ -z "${BN_DEPLOY_REEXEC:-}" ]] && ! git diff --quiet "$before" HEAD -- deploy/deploy.sh; then
+  log "deploy.sh changed; continuing with the new version."
+  BN_DEPLOY_REEXEC=1 exec bash "$APP_DIR/deploy/deploy.sh" "$@"
+fi
 
 docker compose config --quiet
 docker compose build --pull
