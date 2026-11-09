@@ -21,6 +21,81 @@ Only Caddy publishes host ports 80/443. Its Basic Auth gate protects both the st
 
 API and worker startup never create or alter tables. Run `docker compose run --rm api alembic upgrade head` after building the backend image and before starting either service. For local development, from `backend/`, run `uv run alembic upgrade head` before starting Uvicorn or the worker. A missing migration should fail visibly when a service accesses the schema; do not replace this step with `create_all`.
 
+## Private server on the tailnet (`fx553vd-de`)
+
+The production host is `serveradmin@fx553vd-de` (Ubuntu Server), reachable only on the Tailscale network. Tailscale Serve already publishes `https://fx553vd-de.tail3f59ee.ts.net/` (port 443) for another app, so BN-Inven gets its own HTTPS port. Tailscale terminates TLS with the tailnet certificate and forwards to Caddy on loopback. Caddy keeps Basic Auth and remains the only container with a host port.
+
+```text
+tailnet client ──HTTPS :8443──▶ tailscale serve ──HTTP──▶ 127.0.0.1:8090 Caddy ──▶ api / web (internal)
+```
+
+### Development and production stay in separate folders
+
+| | Production | Development |
+| --- | --- | --- |
+| Location | `/srv/apps/bn-inven`, a clean clone of `main` | The workstation clone (Windows/WSL). Optionally a separate server clone such as `~/dev/bn-inven`. |
+| Who changes the code | Only `deploy/deploy.sh` (fast-forward to `origin/main`) | You, on branches, pushed to GitHub |
+| Runtime | Docker Compose project `bn-inven` | `start-dev.sh` (Vite, Uvicorn `--reload`, worker), bound to `127.0.0.1` |
+| Data | Docker volume `bn-inven_bn_data` (database, uploads, exports, pre-deploy backups) | `backend/data/` inside the dev clone |
+| Secrets | `/srv/apps/bn-inven/.env`, mode 600 | The dev clone's own `.env`, normally `AI_PROVIDER=mock` |
+
+Do not develop inside `/srv/apps/bn-inven`. The backend reads the repository-root `.env`, so a dev server started there would use the production AI key and settings. Dev dependency folders and a dev SQLite file would also sit next to production, and edited tracked files block fast-forward deploys. `deploy.sh` refuses to deploy while tracked files are modified. If you develop on the server, use a separate clone and open it through an SSH tunnel (`ssh -L 5173:127.0.0.1:5173 serveradmin@fx553vd-de`). Do not run `docker compose` in that clone unless you give it a different `COMPOSE_PROJECT_NAME`, or its volumes and containers will collide with production.
+
+### One-time server setup
+
+These steps need `sudo` on the server.
+
+1. Install Docker Engine and the Compose plugin. Compose must be 2.24 or newer for the `!override` in `deploy/compose.tailnet.yml`. Then let `serveradmin` use Docker and log in again:
+
+   ```sh
+   sudo apt install docker.io docker-compose-v2
+   docker compose version
+   sudo usermod -aG docker serveradmin
+   ```
+
+2. Clone the repository and create the production `.env`:
+
+   ```sh
+   git clone https://github.com/vdtongdev/bn-inven.git /srv/apps/bn-inven
+   cd /srv/apps/bn-inven
+   cp .env.example .env && chmod 600 .env
+   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'a-strong-password'
+   ```
+
+   In `.env`, set `DOMAIN=:80`, a non-default `BASIC_AUTH_USER`, and `BASIC_AUTH_HASH='<hash>'` in single quotes. Set `CORS_ORIGINS=https://fx553vd-de.tail3f59ee.ts.net:8443` and uncomment `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` and `BN_HTTP_PORT`. Optionally add OpenRouter settings. `DATABASE_URL` and `STORAGE_PATH` are overridden by Compose.
+
+3. Run the first deploy: `bash deploy/deploy.sh --force`. It builds the images, backs up any existing database, runs `alembic upgrade head`, starts the stack and waits for `/api/health`.
+
+4. Publish the app on the tailnet without touching the existing port 443 mapping:
+
+   ```sh
+   sudo tailscale serve --bg --https=8443 http://127.0.0.1:8090
+   tailscale serve status
+   ```
+
+   Open `https://fx553vd-de.tail3f59ee.ts.net:8443/`.
+
+5. Turn on automatic synchronization with GitHub `main`:
+
+   ```sh
+   sudo cp deploy/systemd/bn-inven-deploy.service deploy/systemd/bn-inven-deploy.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now bn-inven-deploy.timer
+   ```
+
+### Synchronization with GitHub `main`
+
+Every 5 minutes the timer runs `deploy/deploy.sh`, which takes these steps:
+
+1. Fetches `origin/main` and compares it with the last successfully deployed commit, stored in `~/.local/state/bn-inven/deployed-commit`. It exits immediately when the two match.
+2. Fast-forwards the checkout. It never merges, rebases or force-resets.
+3. Builds the images, writes a SQLite snapshot to `/data/backups/pre-deploy-*.db` (keeps 10), and runs `alembic upgrade head` explicitly.
+4. Restarts the stack and checks `/api/health`. A commit is recorded as deployed only after the check passes, so a failed build or migration is retried on the next run instead of being skipped.
+
+Anything pushed to `main` reaches production within about 5 minutes, so merge to `main` only what is ready to run. To deploy without waiting, run `sudo systemctl start bn-inven-deploy.service` or `bash deploy/deploy.sh`. To pause automatic deploys, run `sudo systemctl stop bn-inven-deploy.timer`. Follow logs with `journalctl -u bn-inven-deploy.service` and `docker compose logs -f api worker caddy`. Pre-deploy snapshots live on the same disk and do not replace the off-site backups described below.
+
+To roll back, revert the bad commit on GitHub `main` and let the timer deploy it. A rollback that crosses a migration also needs the matching pre-deploy snapshot restored, because Alembic downgrades are not part of the deploy.
+
 ## Access, origins and secrets
 
 The self-hosted deployment uses Caddy Basic Auth in front of both the static frontend and API. CORS is limited to configured origins and supports credentialed browser requests. Load any eventual AI provider key only on the backend. No shared application token is sent to or compiled into the browser.
