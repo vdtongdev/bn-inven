@@ -85,8 +85,10 @@ PY
 log "Applying migrations."
 docker compose run --rm --no-deps api alembic upgrade head
 
-log "Starting services."
-docker compose up -d --remove-orphans
+log "Recreating all services."
+# Always recreate: Compose has been observed keeping a container on its old image
+# after a rebuild, which would leave a frontend-only change undeployed.
+docker compose up -d --force-recreate --remove-orphans
 
 log "Waiting for the API health check."
 for _ in $(seq 1 30); do

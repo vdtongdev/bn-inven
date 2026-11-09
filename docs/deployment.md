@@ -102,7 +102,7 @@ ssh serveradmin@fx553vd-de 'bash /srv/apps/bn-inven/deploy/deploy.sh'
 1. Fetches `origin/main` and compares it with the last successfully deployed commit, stored in `~/.local/state/bn-inven/deployed-commit`. It prints `Already deployed` and exits when the two match.
 2. Fast-forwards the checkout. It never merges, rebases or force-resets, and it refuses to run while tracked files are modified.
 3. Builds the images, writes a SQLite snapshot to `/data/backups/pre-deploy-*.db` (keeps 10), and runs `alembic upgrade head` explicitly.
-4. Restarts the stack and checks `/api/health`. A commit is recorded as deployed only after the check passes; on failure the script prints recent API and worker logs, and the next run retries.
+4. Recreates every container (`--force-recreate`, so each one runs the image just built; expect a few seconds of downtime) and checks `/api/health`. A commit is recorded as deployed only after the check passes; on failure the script prints recent API and worker logs, and the next run retries.
 
 Use `bash deploy/deploy.sh --force` to rebuild and restart an unchanged commit, for example after editing `.env`. Follow logs with `docker compose logs -f api worker caddy` from `/srv/apps/bn-inven`. Pre-deploy snapshots live on the same disk and do not replace the off-site backups described below.
 
