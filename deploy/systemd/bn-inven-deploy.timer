@@ -1,5 +1,5 @@
 [Unit]
-Description=Check GitHub main for BN-Inven updates every 5 minutes
+Description=Optional: check GitHub main for BN-Inven updates every 5 minutes
 
 [Timer]
 OnBootSec=2min
