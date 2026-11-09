@@ -1,0 +1,14 @@
+# Caddy config for a private server behind Tailscale Serve (deploy/compose.tailnet.yml).
+# Tailscale terminates HTTPS and admits only devices on the tailnet, so this
+# gateway has no Basic Auth. Never use it on a host reachable from the internet;
+# public deployments use infra/Caddyfile, which requires Basic Auth.
+:80 {
+  encode zstd gzip
+  @api path /api/*
+  handle @api {
+    reverse_proxy api:8000
+  }
+  handle {
+    reverse_proxy web:80
+  }
+}

@@ -1,10 +1,17 @@
 # Override for a private server behind Tailscale Serve (for example fx553vd-de).
-# Tailscale terminates HTTPS with the tailnet certificate and proxies to Caddy,
-# so Caddy listens on loopback only and serves plain HTTP. Caddy remains the only
-# service with a host port; API and web stay on the internal Compose network.
-# Enable it with COMPOSE_FILE=docker-compose.yml:deploy/compose.tailnet.yml in .env
-# and set DOMAIN=:80. `!override` needs Docker Compose 2.24 or newer.
+# Tailscale terminates HTTPS with the tailnet certificate, admits only tailnet
+# devices, and proxies to Caddy on loopback. Caddy serves plain HTTP without
+# Basic Auth (deploy/Caddyfile.tailnet) and remains the only service with a host
+# port; API and web stay on the internal Compose network.
+# Enable it with COMPOSE_FILE=docker-compose.yml:deploy/compose.tailnet.yml in .env.
+# docker-compose.yml still requires DOMAIN and BASIC_AUTH_* to have values, but
+# they are unused here. `!reset`/`!override` need Docker Compose 2.24 or newer.
 services:
   caddy:
+    environment: !reset {}
     ports: !override
       - "127.0.0.1:${BN_HTTP_PORT:-8090}:80"
+    volumes: !override
+      - ./deploy/Caddyfile.tailnet:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config

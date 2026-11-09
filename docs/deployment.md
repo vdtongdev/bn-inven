@@ -23,7 +23,9 @@ API and worker startup never create or alter tables. Run `docker compose run --r
 
 ## Private server on the tailnet (`fx553vd-de`)
 
-The production host is `serveradmin@fx553vd-de` (Ubuntu Server), reachable only on the Tailscale network. Tailscale Serve already publishes `https://fx553vd-de.tail3f59ee.ts.net/` (port 443) for another app, so BN-Inven gets its own HTTPS port. Tailscale terminates TLS with the tailnet certificate and forwards to Caddy on loopback. Caddy keeps Basic Auth and remains the only container with a host port.
+The production host is `serveradmin@fx553vd-de` (Ubuntu Server), reachable only on the Tailscale network. Tailscale Serve already publishes `https://fx553vd-de.tail3f59ee.ts.net/` (port 443) for another app, so BN-Inven gets its own HTTPS port. Tailscale terminates TLS with the tailnet certificate and forwards to Caddy on loopback. Caddy remains the only container with a host port.
+
+Access control on this host is the tailnet itself: only devices signed in to the tailnet (and any device a node is shared with) can reach the app. Caddy uses `deploy/Caddyfile.tailnet`, which has no Basic Auth, so there is no second password prompt. Restrict access further with Tailscale ACLs if the tailnet ever includes other people. Never use the tailnet override on a host that is reachable from the internet; public deployments keep `infra/Caddyfile` with Basic Auth.
 
 ```text
 tailnet client ──HTTPS :8443──▶ tailscale serve ──HTTP──▶ 127.0.0.1:8090 Caddy ──▶ api / web (internal)
@@ -45,7 +47,7 @@ Do not develop inside `/srv/apps/bn-inven`. The backend reads the repository-roo
 
 These steps need `sudo` on the server.
 
-1. Install Docker Engine and the Compose plugin. Compose must be 2.24 or newer for the `!override` in `deploy/compose.tailnet.yml`. Then let `serveradmin` use Docker and log in again:
+1. Install Docker Engine and the Compose plugin. Compose must be 2.24 or newer for the `!reset`/`!override` tags in `deploy/compose.tailnet.yml`. Then let `serveradmin` use Docker and log in again:
 
    ```sh
    sudo apt install docker.io docker-compose-v2
@@ -59,10 +61,9 @@ These steps need `sudo` on the server.
    git clone https://github.com/vdtongdev/bn-inven.git /srv/apps/bn-inven
    cd /srv/apps/bn-inven
    cp .env.example .env && chmod 600 .env
-   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'a-strong-password'
    ```
 
-   In `.env`, set `DOMAIN=:80`, a non-default `BASIC_AUTH_USER`, and `BASIC_AUTH_HASH='<hash>'` in single quotes. Set `CORS_ORIGINS=https://fx553vd-de.tail3f59ee.ts.net:8443` and uncomment `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` and `BN_HTTP_PORT`. Optionally add OpenRouter settings. `DATABASE_URL` and `STORAGE_PATH` are overridden by Compose.
+   In `.env`, set `DOMAIN=:80` and `BASIC_AUTH_HASH=unused`. `docker-compose.yml` requires `DOMAIN` and `BASIC_AUTH_*` to have values, but the tailnet override does not pass them to Caddy. Set `CORS_ORIGINS=https://fx553vd-de.tail3f59ee.ts.net:8443` and uncomment `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` and `BN_HTTP_PORT`. Optionally add OpenRouter settings. `DATABASE_URL` and `STORAGE_PATH` are overridden by Compose.
 
 3. Run the first deploy: `bash deploy/deploy.sh --force`. It builds the images, backs up any existing database, runs `alembic upgrade head`, starts the stack and waits for `/api/health`.
 
@@ -98,7 +99,7 @@ To roll back, revert the bad commit on GitHub `main` and let the timer deploy it
 
 ## Access, origins and secrets
 
-The self-hosted deployment uses Caddy Basic Auth in front of both the static frontend and API. CORS is limited to configured origins and supports credentialed browser requests. Load any eventual AI provider key only on the backend. No shared application token is sent to or compiled into the browser.
+The public self-hosted deployment uses Caddy Basic Auth in front of both the static frontend and API. The private tailnet deployment relies on Tailscale for access control instead (see above). CORS is limited to configured origins and supports credentialed browser requests. Load any eventual AI provider key only on the backend. No shared application token is sent to or compiled into the browser.
 
 ### Optional OpenRouter vision extraction
 
