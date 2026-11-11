@@ -4,9 +4,10 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.ai.providers import ProviderResult
+from app.core.config import get_settings
 from app.db import SessionLocal
 from app.main import app
-from app.models import ExtractionJob
+from app.models import ExtractionJob, ProductPhoto
 from app.schemas import ExtractionPayload
 from app.workers.extraction import process_one
 
@@ -73,6 +74,30 @@ def test_reupload_after_exclusion_produces_a_visible_review_product():
         third = client.post(f"/api/batches/{batch['id']}/photos",
             files={"file": ("once-more.png", data, "image/png")}).json()
         assert third["job_id"] == second["job_id"]
+
+
+def test_excluding_product_removes_its_images_only():
+    with TestClient(app) as client:
+        batch = client.post("/api/batches", json={"name": "Remove images"}).json()
+        first = client.post(f"/api/batches/{batch['id']}/photos",
+            files={"file": ("front.png", photo_bytes("red"), "image/png")}).json()
+        assert process_one() is True
+        draft_id = client.get(f"/api/jobs/{first['job_id']}").json()["draft_id"]
+        extra = client.post(f"/api/batches/{batch['id']}/photos", data={"draft_id": draft_id},
+            files={"file": ("back.png", photo_bytes("blue"), "image/png")}).json()
+        other = client.post(f"/api/batches/{batch['id']}/photos",
+            files={"file": ("other.png", photo_bytes("green"), "image/png")}).json()
+        with SessionLocal() as db:
+            paths = [get_settings().storage_path / db.get(ProductPhoto, photo_id).filename
+                     for photo_id in (first["photo_id"], extra["photo_id"], other["photo_id"])]
+        assert all(path.exists() for path in paths)
+        assert client.patch(f"/api/drafts/{draft_id}", json={"review_status": "Excluded"}).status_code == 200
+        assert not paths[0].exists() and not paths[1].exists()
+        assert paths[2].exists()
+        assert client.get(f"/api/photos/{first['photo_id']}/image").status_code == 410
+        assert client.patch(f"/api/drafts/{draft_id}", json={"review_status": "Excluded"}).status_code == 200
+        assert process_one() is True
+        assert process_one() is True
 
 
 def test_additional_photo_preserves_human_edits_including_empty_fields(monkeypatch):
