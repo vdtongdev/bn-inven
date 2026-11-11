@@ -151,6 +151,13 @@ def update_draft(draft_id: str, payload: DraftPatch, db: Session = Depends(get_d
     record_draft_audit_event(db, draft, action, before)
     db.commit()
     db.refresh(draft)
+    if draft.review_status == ReviewStatus.excluded:
+        try:
+            for photo in draft.additional_photos:
+                (get_settings().storage_path / photo.filename).unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Failed to remove images for excluded draft %s", draft.id)
+            raise HTTPException(500, "Product excluded, but its images could not be removed; retry removal") from None
     return draft_output(db, draft)
 
 

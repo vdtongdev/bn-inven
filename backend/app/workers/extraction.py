@@ -39,6 +39,12 @@ def process_one() -> bool:
         job.updated_at = now
         db.commit()
         photo = db.get(ProductPhoto, job.photo_id)
+        if photo.draft_id and db.get(ProductDraft, photo.draft_id).review_status == ReviewStatus.excluded:
+            job.status = JobStatus.failed
+            job.last_error = "Product was excluded during recognition. Upload the image again to create a new draft."
+            job.updated_at = now_utc()
+            db.commit()
+            return True
         path = get_settings().storage_path / photo.filename
         try:
             provider = get_provider(get_settings().ai_provider)
