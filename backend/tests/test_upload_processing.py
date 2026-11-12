@@ -153,7 +153,7 @@ def test_removal_preserves_running_or_approved_items(protected):
             path = get_settings().storage_path / db.get(ProductPhoto, uploaded["photo_id"]).filename
         if protected == "approved":
             assert client.patch(f"/api/drafts/{draft_id}", json={
-                "product_name": "Reviewed", "item_type": "Goods", "primary_unit": "piece"
+                "product_name": "Reviewed", "primary_unit": "piece"
             }).status_code == 200
             catalog_id = client.post(f"/api/drafts/{draft_id}/approve").json()["matched_catalog_item_id"]
         else:

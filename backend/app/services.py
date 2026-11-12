@@ -12,6 +12,7 @@ from app.models import (CaptureBatch, CatalogItem, ExtractionJob, ExtractionResu
                         DraftAuditEvent, MisaExportProfile, ProductDraft, ProductPhoto,
                         ReviewStatus, now_utc)
 from app.schemas import ExtractionPayload
+from app.product_names import update_final_name
 
 
 def normalize_text(value: str | None) -> str | None:
@@ -73,8 +74,9 @@ async def save_photo(db: Session, batch: CaptureBatch, upload: UploadFile,
 
 def validate_draft(draft: ProductDraft) -> list[str]:
     missing = []
-    for field in ("product_name", "item_type", "primary_unit"):
-        if not normalize_text(getattr(draft, field)):
+    for field in ("product_name", "primary_unit"):
+        value = draft.final_name if field == "product_name" else getattr(draft, field)
+        if not normalize_text(value):
             missing.append(field)
     return missing
 
@@ -107,7 +109,7 @@ def delete_working_draft(db: Session, draft_id: str) -> None:
 
 
 _DRAFT_AUDIT_FIELDS = (
-    "product_name", "brand", "model_number", "barcode", "item_type", "category_code",
+    "product_name", "product_type", "brand", "model_number", "barcode", "category_code",
     "primary_unit", "package_size", "review_status", "matched_catalog_item_id",
 )
 
@@ -141,15 +143,16 @@ def record_draft_audit_event(
 
 def approve_draft(db: Session, draft: ProductDraft) -> ProductDraft:
     before = draft_audit_snapshot(draft)
+    update_final_name(draft)
     missing = validate_draft(draft)
     if missing:
         raise HTTPException(422, {"message": "Draft is missing required fields", "fields": missing})
     draft.product_name = normalize_text(draft.product_name)
     draft.primary_unit = normalize_text(draft.primary_unit)
     draft.review_status = ReviewStatus.approved
-    catalog = CatalogItem(item_code=draft.item_code, product_name=draft.product_name,
+    catalog = CatalogItem(item_code=draft.item_code, product_name=draft.final_name,
                           brand=draft.brand, model_number=draft.model_number, barcode=draft.barcode,
-                          item_type=draft.item_type, category_code=draft.category_code,
+                          category_code=draft.category_code,
                           primary_unit=draft.primary_unit, package_size=draft.package_size)
     db.add(catalog)
     db.flush()
@@ -166,8 +169,8 @@ def seed_demo_profile(db: Session) -> None:
         db.add(MisaExportProfile(code="GENERIC_DEMO", name="GENERIC / DEMO (not an official MISA template)",
                                  worksheet_name="Demo Items", start_row=2,
                                  column_mapping={"item_code": 1, "product_name": 2, "brand": 3,
-                                                 "model_number": 4, "barcode": 5, "item_type": 6,
-                                                 "category_code": 7, "primary_unit": 8, "package_size": 9},
-                                 required_fields=["item_code", "product_name", "item_type", "primary_unit"],
+                                                 "model_number": 4, "barcode": 5,
+                                                 "category_code": 6, "primary_unit": 7, "package_size": 8},
+                                 required_fields=["item_code", "product_name", "primary_unit"],
                                  permitted_values={}, is_demo=True))
         db.commit()

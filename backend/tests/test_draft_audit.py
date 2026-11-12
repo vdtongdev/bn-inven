@@ -75,7 +75,7 @@ def test_edit_noop_approval_and_history_are_chronological(monkeypatch):
         assert len(history(client, draft_id).json()) == 1
 
         second_edit = client.patch(f"/api/drafts/{draft_id}", json={
-            "item_type": " Goods ", "primary_unit": " each "
+            "primary_unit": " each "
         })
         assert second_edit.status_code == 200
         item_code = second_edit.json()["item_code"]
@@ -88,7 +88,6 @@ def test_edit_noop_approval_and_history_are_chronological(monkeypatch):
         events = history(client, draft_id).json()
         assert [event["action"] for event in events] == ["edited", "edited", "approved"]
         assert events[1]["changes"] == {
-            "item_type": {"before": None, "after": "Goods"},
             "primary_unit": {"before": None, "after": "each"},
         }
         assert events[2]["changes"]["review_status"] == {
@@ -156,7 +155,7 @@ def test_failed_approval_transaction_keeps_draft_catalog_and_history_unchanged(m
     with TestClient(app, raise_server_exceptions=False) as client:
         _batch_id, draft_id = create_draft(client, monkeypatch, "Rollback test")
         edited = client.patch(f"/api/drafts/{draft_id}", json={
-            "item_type": "Goods", "primary_unit": "each"
+            "primary_unit": "each"
         })
         item_code = edited.json()["item_code"]
         before_history = history(client, draft_id).json()

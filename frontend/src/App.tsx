@@ -3,8 +3,8 @@ import { api, apiUrl } from './api'
 import type { Batch, Draft, ExportProfile } from './types'
 
 const fields: { key: keyof Draft; label: string }[] = [
+  { key: 'product_type', label: 'Loại sản phẩm' },
   { key: 'product_name', label: 'Tên sản phẩm' }, { key: 'brand', label: 'Thương hiệu' },
-  { key: 'item_type', label: 'Loại hàng' },
   { key: 'primary_unit', label: 'Đơn vị tính' }, { key: 'package_size', label: 'Quy cách đóng gói' },
 ]
 
@@ -15,17 +15,11 @@ function normalizeTitlePart(value: string | null | undefined) {
 }
 
 function itemTitle(draft: Draft) {
-  const productType = String(draft.extraction?.observed.product_type ?? '').trim()
-  const productName = draft.product_name?.trim() ?? ''
-  if (!productType) return productName || 'Chưa đọc được tên sản phẩm'
-
-  const sameAsType = normalizeTitlePart(productName) === normalizeTitlePart(productType)
-  const titleParts = [productType]
-  if (draft.brand?.trim()) titleParts.push(draft.brand.trim())
-  if (!sameAsType && productName) titleParts.push(productName)
-  if (draft.primary_unit?.trim()) titleParts.push(draft.primary_unit.trim())
-  if (draft.package_size?.trim()) titleParts.push(draft.package_size.trim())
-  return titleParts.join(' ')
+  if (draft.review_status === 'Approved' && draft.final_name) return draft.final_name
+  const parts = [draft.product_type, draft.brand, draft.product_name, draft.primary_unit, draft.package_size]
+    .map(value => (value ?? '').trim().replace(/\s+/g, ' '))
+  if (parts[2] && [parts[0], parts[1]].some(value => normalizeTitlePart(value) === normalizeTitlePart(parts[2]))) parts[2] = ''
+  return parts.slice(0, 3).some(Boolean) ? parts.filter(Boolean).join(' ') : 'Chưa đọc được tên sản phẩm'
 }
 
 function createInternalBatchOnce() {
@@ -137,7 +131,7 @@ export default function App() {
     pendingSaves.current.add(draft.id)
     setApprovingIds(current => [...current, draft.id])
     try {
-      await api<Draft>(`/api/drafts/${draft.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product_name: draft.product_name, brand: draft.brand, model_number: draft.model_number, barcode: draft.barcode, item_type: draft.item_type, category_code: draft.category_code, primary_unit: draft.primary_unit, package_size: draft.package_size }) })
+      await api<Draft>(`/api/drafts/${draft.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product_type: draft.product_type, product_name: draft.product_name, brand: draft.brand, model_number: draft.model_number, barcode: draft.barcode, category_code: draft.category_code, primary_unit: draft.primary_unit, package_size: draft.package_size }) })
       const updated = await api<Draft>(`/api/drafts/${draft.id}/approve`, { method: 'POST' })
       refreshVersion.current++
       setEdits(current => { const remaining = { ...current }; delete remaining[draft.id]; return remaining })
@@ -186,7 +180,7 @@ export default function App() {
             <div className="grid gap-2">{fields.map(field => <label className="grid gap-1 text-sm" key={field.key}><span>{field.label}{!draft[field.key] && <span className="ml-1 text-amber-700">· cần kiểm tra</span>}</span><input className="input" value={String(draft[field.key] ?? '')} disabled={draft.review_status === 'Approved' || approvingIds.includes(draft.id)} onChange={e => { const value = e.target.value; setEdits(current => ({ ...current, [draft.id]: { ...current[draft.id], [field.key]: value } })) }} /></label>)}</div>
             {draft.review_status !== 'Approved' && <>
               <label className="secondary mt-3 flex cursor-pointer justify-center">Thêm ảnh cho sản phẩm<input className="sr-only" type="file" accept="image/*" capture="environment" disabled={busy || !online} onChange={e => void upload(e.target.files?.[0], draft.id)} /></label>
-              <button className="secondary mt-2 w-full" onClick={() => void saveDraft(draft, { product_name: draft.product_name, brand: draft.brand, model_number: draft.model_number, barcode: draft.barcode, item_type: draft.item_type, category_code: draft.category_code, primary_unit: draft.primary_unit, package_size: draft.package_size })}>Lưu thay đổi</button>
+              <button className="secondary mt-2 w-full" onClick={() => void saveDraft(draft, { product_type: draft.product_type, product_name: draft.product_name, brand: draft.brand, model_number: draft.model_number, barcode: draft.barcode, category_code: draft.category_code, primary_unit: draft.primary_unit, package_size: draft.package_size })}>Lưu thay đổi</button>
               <button className="primary mt-2 w-full" onClick={() => void approve(draft)}>Kiểm tra hợp lệ và duyệt</button>
               <button className="secondary mt-2 w-full border-red-300 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => void removeDraft(draft)}>Loại bỏ sản phẩm</button>
             </>}

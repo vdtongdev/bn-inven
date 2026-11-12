@@ -12,6 +12,7 @@ from app.db import SessionLocal
 from app.models import (CatalogItem, ExtractionJob, ExtractionResult, JobStatus, ProductDraft,
                         ProductPhoto, ReviewStatus, now_utc)
 from app.services import normalize_text, seed_demo_profile
+from app.product_names import update_final_name
 
 logger = logging.getLogger("bn_inven.worker")
 
@@ -111,12 +112,14 @@ def process_one() -> bool:
                             "requires_human_review": True,
                         }
                 draft = ProductDraft(batch_id=photo.batch_id, extraction_result_id=extraction.id,
+                    product_type=normalize_text(payload.product_type),
                     item_code=f"BN-{photo.id[:8].upper()}", product_name=normalize_text(payload.product_name),
                     brand=normalize_text(payload.brand), model_number=normalize_text(payload.model_number),
                     barcode=normalize_text(payload.barcode), category_code=payload.category_suggestion,
                     primary_unit=payload.unit_suggestion, package_size=payload.package_size,
-                    item_type=None, review_status=ReviewStatus.pending,
+                    review_status=ReviewStatus.pending,
                     duplicate_suggestion=duplicate_suggestion)
+                update_final_name(draft)
                 db.add(draft)
                 db.flush()
                 photo.draft_id = draft.id
@@ -135,6 +138,7 @@ def process_one() -> bool:
                     # Once a human edits a draft, AI must not replace even deliberately empty values.
                     if draft.review_status == ReviewStatus.pending:
                         for field, value in {
+                            "product_type": payload.product_type,
                             "product_name": payload.product_name, "brand": payload.brand,
                             "model_number": payload.model_number, "barcode": payload.barcode,
                             "category_code": payload.category_suggestion,
@@ -142,6 +146,7 @@ def process_one() -> bool:
                         }.items():
                             if not getattr(draft, field):
                                 setattr(draft, field, normalize_text(value))
+                        update_final_name(draft)
             job.status = JobStatus.succeeded
             job.last_error = None
             job.updated_at = now_utc()

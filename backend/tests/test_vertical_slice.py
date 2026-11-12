@@ -99,7 +99,7 @@ def test_durable_job_review_approval_and_demo_export():
         assert len(after_second_photo) == 1
         assert len(after_second_photo[0]["photo_ids"]) == 2
         edited = client.patch(f"/api/drafts/{draft_id}", json={
-            "product_name": "  Bút bi xanh  ", "item_type": "Hàng hóa", "primary_unit": "cây"
+            "product_name": "  Bút bi xanh  ", "primary_unit": "cây"
         })
         assert edited.status_code == 200
         approved = client.post(f"/api/drafts/{draft_id}/approve")
@@ -111,7 +111,7 @@ def test_durable_job_review_approval_and_demo_export():
         content = client.get(f"/api/exports/{exported.json()['id']}/download").content
         sheet = load_workbook(BytesIO(content), read_only=True).active
         assert sheet["A2"].value.startswith("BN-")
-        assert sheet["B2"].value == "Bút bi xanh"
+        assert sheet["B2"].value == "Bút bi xanh cây"
 
 
 def test_mock_provider_does_not_invent_label_facts(tmp_path):
@@ -183,7 +183,7 @@ def test_exact_barcode_matches_are_suggestions_not_merges(monkeypatch):
 
     with SessionLocal() as db:
         catalog_item = CatalogItem(item_code="CAT-MATCH-1", product_name="Catalog widget",
-            item_type="Hàng hóa", primary_unit="cái", barcode="CAT-123")
+            primary_unit="cái", barcode="CAT-123")
         db.add(catalog_item)
         db.commit()
         catalog_id = catalog_item.id
