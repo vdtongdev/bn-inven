@@ -4,6 +4,7 @@ import type { Batch, Draft, ExportProfile } from './types'
 
 const fields: { key: keyof Draft; label: string }[] = [
   { key: 'product_name', label: 'Tên sản phẩm' }, { key: 'brand', label: 'Thương hiệu' },
+  { key: 'item_type', label: 'Loại hàng' },
   { key: 'primary_unit', label: 'Đơn vị tính' }, { key: 'package_size', label: 'Quy cách đóng gói' },
 ]
 
