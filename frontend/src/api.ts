@@ -15,7 +15,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const payload = await response.json().catch(() => ({}))
     if (Array.isArray(payload.detail?.fields)) {
       const labels: Record<string, string> = {
-        product_name: 'Tên sản phẩm', item_type: 'Loại hàng', primary_unit: 'Đơn vị tính',
+        product_name: 'Tên sản phẩm', primary_unit: 'Đơn vị tính',
       }
       const missing = payload.detail.fields.map((field: string) => labels[field] ?? field)
       throw new Error(`${payload.detail.message}: ${missing.join(', ')}`)

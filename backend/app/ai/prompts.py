@@ -14,7 +14,7 @@ Use sentence case for descriptive text: capitalize the first letter and lowercas
 the rest. Do not change identifiers, package measurements or attribute values
 containing technical symbols or codes to satisfy this presentation rule.
 Set uncertain product_type, product_name or unit_suggestion to null. product_type
-is the product's generic type, not the business item_type (goods or service).
+is the product's generic type, such as milk, detergent, or pen.
 unit_suggestion is the Vietnamese sales or package unit (such as cái, hộp, or
 bịch); package_size is the amount inside the package (such as 1 kg), not an
 on-hand quantity.

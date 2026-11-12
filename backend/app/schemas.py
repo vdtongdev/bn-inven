@@ -42,11 +42,11 @@ class BatchOut(BaseModel):
 
 
 class DraftPatch(BaseModel):
+    product_type: str | None = Field(default=None, max_length=160)
     product_name: str | None = Field(default=None, max_length=240)
     brand: str | None = Field(default=None, max_length=160)
     model_number: str | None = Field(default=None, max_length=120)
     barcode: str | None = Field(default=None, max_length=80)
-    item_type: str | None = Field(default=None, max_length=40)
     category_code: str | None = Field(default=None, max_length=80)
     primary_unit: str | None = Field(default=None, max_length=40)
     package_size: str | None = Field(default=None, max_length=120)
@@ -59,10 +59,11 @@ class DraftOut(BaseModel):
     batch_id: str
     item_code: str
     product_name: str | None
+    product_type: str | None
+    final_name: str | None
     brand: str | None
     model_number: str | None
     barcode: str | None
-    item_type: str | None
     category_code: str | None
     primary_unit: str | None
     package_size: str | None

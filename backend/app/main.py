@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db import get_db
+from app.product_names import update_final_name
 from app.exporters.demo_xlsx import make_workbook
 from app.models import (CaptureBatch, DraftAuditEvent, ExportRun, ExtractionJob,
                         ExtractionResult, JobStatus, MisaExportProfile, ProductDraft,
@@ -29,8 +30,9 @@ app.add_middleware(CORSMiddleware, allow_origins=get_settings().allowed_origins,
 def draft_output(db: Session, draft: ProductDraft) -> dict:
     extraction = db.get(ExtractionResult, draft.extraction_result_id) if draft.extraction_result_id else None
     return {"id": draft.id, "batch_id": draft.batch_id, "item_code": draft.item_code,
+            "product_type": draft.product_type, "final_name": draft.final_name,
             "product_name": draft.product_name, "brand": draft.brand, "model_number": draft.model_number,
-            "barcode": draft.barcode, "item_type": draft.item_type, "category_code": draft.category_code,
+            "barcode": draft.barcode, "category_code": draft.category_code,
             "primary_unit": draft.primary_unit, "package_size": draft.package_size,
             "review_status": draft.review_status.value, "matched_catalog_item_id": draft.matched_catalog_item_id,
             "duplicate_suggestion": draft.duplicate_suggestion,
@@ -147,6 +149,7 @@ def update_draft(draft_id: str, payload: DraftPatch, db: Session = Depends(get_d
         for field, value in data.items():
             setattr(draft, field, value.strip() if isinstance(value, str) else value)
         draft.review_status = ReviewStatus.needs_correction
+        update_final_name(draft)
     action = "excluded" if draft.review_status == ReviewStatus.excluded else "edited"
     record_draft_audit_event(db, draft, action, before)
     db.commit()
@@ -198,8 +201,8 @@ def create_export(payload: ExportCreate, db: Session = Depends(get_db)):
         raise HTTPException(422, "Only approved drafts can be exported")
     missing = {d.item_code: validate_draft(d) for d in drafts}
     missing = {code: fields for code, fields in missing.items() if fields}
-    for row, draft in zip(rows := [{"item_code": d.item_code, "product_name": d.product_name, "brand": d.brand,
-                                   "model_number": d.model_number, "barcode": d.barcode, "item_type": d.item_type,
+    for row, draft in zip(rows := [{"item_code": d.item_code, "product_name": d.final_name, "brand": d.brand,
+                                   "model_number": d.model_number, "barcode": d.barcode,
                                    "category_code": d.category_code, "primary_unit": d.primary_unit,
                                    "package_size": d.package_size} for d in drafts], drafts):
         for field in profile.required_fields:
