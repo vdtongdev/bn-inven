@@ -81,15 +81,29 @@ def validate_draft(draft: ProductDraft) -> list[str]:
     return missing
 
 
-def delete_working_draft(db: Session, draft_id: str) -> None:
+def edit_approved_draft(db: Session, draft: ProductDraft, fields: dict) -> None:
+    catalog = db.scalar(select(CatalogItem).where(CatalogItem.item_code == draft.item_code))
+    if not catalog:
+        raise HTTPException(409, "Approved product is missing its catalog record")
+    for field, value in fields.items():
+        setattr(draft, field, value.strip() if isinstance(value, str) else value)
+    update_final_name(draft)
+    missing = validate_draft(draft)
+    if missing:
+        raise HTTPException(422, {"message": "Product is missing required fields", "fields": missing})
+    catalog.product_name = draft.final_name
+    for field in ("brand", "model_number", "barcode", "category_code", "primary_unit", "package_size"):
+        setattr(catalog, field, getattr(draft, field))
+
+
+def delete_draft(db: Session, draft_id: str) -> None:
     # Acquire SQLite's write lock before checking jobs, serializing against worker claims.
     locked = db.execute(update(ProductDraft).where(ProductDraft.id == draft_id)
                         .values(updated_at=ProductDraft.updated_at))
     if not locked.rowcount:
         raise HTTPException(404, "Draft not found")
     draft = db.get(ProductDraft, draft_id)
-    if draft.review_status == ReviewStatus.approved:
-        raise HTTPException(409, "Approved catalog items cannot be removed")
+    item_code = draft.item_code
     photos = db.scalars(select(ProductPhoto).where(ProductPhoto.draft_id == draft_id)).all()
     photo_ids = [photo.id for photo in photos]
     running = db.scalar(select(ExtractionJob.id).where(
@@ -105,6 +119,9 @@ def delete_working_draft(db: Session, draft_id: str) -> None:
     db.execute(delete(ProductDraft).where(ProductDraft.id == draft_id))
     # Foreign keys cascade to jobs and results; draft deletion cascades to audit events.
     db.execute(delete(ProductPhoto).where(ProductPhoto.id.in_(photo_ids)))
+    # Item codes identify the catalog record created by approval. A duplicate match
+    # may refer to another product, so never delete by matched_catalog_item_id.
+    db.execute(delete(CatalogItem).where(CatalogItem.item_code == item_code))
     db.commit()
 
 

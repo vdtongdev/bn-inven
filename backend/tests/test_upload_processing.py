@@ -103,7 +103,8 @@ def test_excluding_product_removes_its_images_only():
         assert process_one() is True
 
 
-def test_removing_working_item_purges_records_and_all_images():
+@pytest.mark.parametrize("approved", [False, True])
+def test_removing_item_purges_records_and_all_images(approved):
     with TestClient(app) as client:
         batch = client.post("/api/batches", json={"name": "Permanent removal"}).json()
         first = client.post(f"/api/batches/{batch['id']}/photos",
@@ -123,6 +124,20 @@ def test_removing_working_item_purges_records_and_all_images():
             result_ids = list(db.scalars(select(ExtractionResult.id).where(ExtractionResult.photo_id.in_(photo_ids))))
             assert len(result_ids) == 2
             assert db.scalar(select(DraftAuditEvent.id).where(DraftAuditEvent.draft_id == draft_id))
+        if approved:
+            assert client.patch(f"/api/drafts/{draft_id}", json={
+                "product_name": "Reviewed", "primary_unit": "piece"
+            }).status_code == 200
+            approval = client.post(f"/api/drafts/{draft_id}/approve")
+            assert approval.status_code == 200
+            catalog_id = approval.json()["matched_catalog_item_id"]
+            profile = client.get("/api/export-profiles").json()[0]
+            exported = client.post("/api/exports", json={
+                "profile_id": profile["id"], "draft_ids": [draft_id]
+            })
+            assert exported.status_code == 201
+            download_url = f"/api/exports/{exported.json()['id']}/download"
+            workbook = client.get(download_url).content
         assert client.delete(f"/api/drafts/{draft_id}").status_code == 200
         assert all(not path.exists() for path in paths)
         with SessionLocal() as db:
@@ -131,6 +146,13 @@ def test_removing_working_item_purges_records_and_all_images():
             assert all(db.get(ExtractionJob, jid) is None for jid in job_ids)
             assert all(db.get(ExtractionResult, rid) is None for rid in result_ids)
             assert db.scalar(select(DraftAuditEvent.id).where(DraftAuditEvent.draft_id == draft_id)) is None
+            if approved:
+                assert db.get(CatalogItem, catalog_id) is None
+        if approved:
+            assert client.get(download_url).content == workbook
+            assert client.post("/api/exports", json={
+                "profile_id": profile["id"], "draft_ids": [draft_id]
+            }).status_code == 404
         assert client.get(f"/api/batches/{batch['id']}/drafts").json() == []
         assert client.delete(f"/api/drafts/{draft_id}").status_code == 404
         # The same image must create a fresh job and working item after deletion.
@@ -141,8 +163,8 @@ def test_removing_working_item_purges_records_and_all_images():
         assert client.get(f"/api/jobs/{reupload['job_id']}").json()["draft_id"] != draft_id
 
 
-@pytest.mark.parametrize("protected", ["running", "approved"])
-def test_removal_preserves_running_or_approved_items(protected):
+@pytest.mark.parametrize("approved", [False, True])
+def test_removal_preserves_items_with_running_jobs(approved):
     with TestClient(app) as client:
         batch = client.post("/api/batches", json={"name": "Protected removal"}).json()
         uploaded = client.post(f"/api/batches/{batch['id']}/photos",
@@ -151,27 +173,41 @@ def test_removal_preserves_running_or_approved_items(protected):
         draft_id = client.get(f"/api/jobs/{uploaded['job_id']}").json()["draft_id"]
         with SessionLocal() as db:
             path = get_settings().storage_path / db.get(ProductPhoto, uploaded["photo_id"]).filename
-        if protected == "approved":
+        if approved:
             assert client.patch(f"/api/drafts/{draft_id}", json={
                 "product_name": "Reviewed", "primary_unit": "piece"
             }).status_code == 200
             catalog_id = client.post(f"/api/drafts/{draft_id}/approve").json()["matched_catalog_item_id"]
-        else:
-            with SessionLocal() as db:
-                db.get(ExtractionJob, uploaded["job_id"]).status = JobStatus.running
-                db.commit()
+        with SessionLocal() as db:
+            db.get(ExtractionJob, uploaded["job_id"]).status = JobStatus.running
+            db.commit()
         assert client.delete(f"/api/drafts/{draft_id}").status_code == 409
         assert path.exists()
         with SessionLocal() as db:
             assert db.get(ProductDraft, draft_id) is not None
             assert db.get(ExtractionJob, uploaded["job_id"]) is not None
-            if protected == "approved":
+            if approved:
                 assert db.get(CatalogItem, catalog_id) is not None
-            else:
-                db.get(ExtractionJob, uploaded["job_id"]).status = JobStatus.succeeded
-                db.commit()
-        if protected == "running":
-            assert client.delete(f"/api/drafts/{draft_id}").status_code == 200
+            db.get(ExtractionJob, uploaded["job_id"]).status = JobStatus.succeeded
+            db.commit()
+        assert client.delete(f"/api/drafts/{draft_id}").status_code == 200
+
+
+def test_removal_preserves_another_products_matched_catalog_record():
+    with TestClient(app) as client:
+        batch = client.post("/api/batches", json={"name": "Keep duplicate target"}).json()
+        with SessionLocal() as db:
+            catalog = CatalogItem(item_code="KEEP-CATALOG", product_name="Other item", primary_unit="piece")
+            db.add(catalog)
+            db.flush()
+            draft = ProductDraft(batch_id=batch["id"], item_code="DELETE-DUPLICATE",
+                                 matched_catalog_item_id=catalog.id)
+            db.add(draft)
+            db.commit()
+            draft_id, catalog_id = draft.id, catalog.id
+        assert client.delete(f"/api/drafts/{draft_id}").status_code == 200
+        with SessionLocal() as db:
+            assert db.get(CatalogItem, catalog_id) is not None
 
 
 def test_additional_photo_preserves_human_edits_including_empty_fields(monkeypatch):

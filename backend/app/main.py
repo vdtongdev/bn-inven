@@ -17,7 +17,7 @@ from app.models import (CaptureBatch, DraftAuditEvent, ExportRun, ExtractionJob,
                         ProductPhoto, ReviewStatus)
 from app.schemas import (BatchCreate, DraftAuditEventOut, DraftOut, DraftPatch, ExportCreate,
                          ExportOut, JobOut)
-from app.services import (approve_draft, delete_working_draft, draft_audit_snapshot, record_draft_audit_event,
+from app.services import (approve_draft, delete_draft, draft_audit_snapshot, edit_approved_draft, record_draft_audit_event,
                           save_photo, seed_demo_profile, validate_draft)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -144,7 +144,7 @@ def update_draft(draft_id: str, payload: DraftPatch, db: Session = Depends(get_d
     if data.pop("review_status", None) == ReviewStatus.excluded.value:
         draft.review_status = ReviewStatus.excluded
     elif draft.review_status == ReviewStatus.approved:
-        raise HTTPException(409, "Approved catalog items are immutable in this MVP")
+        edit_approved_draft(db, draft, data)
     else:
         for field, value in data.items():
             setattr(draft, field, value.strip() if isinstance(value, str) else value)
@@ -166,7 +166,7 @@ def update_draft(draft_id: str, payload: DraftPatch, db: Session = Depends(get_d
 
 @app.delete("/api/drafts/{draft_id}")
 def remove_draft(draft_id: str, db: Session = Depends(get_db)):
-    delete_working_draft(db, draft_id)
+    delete_draft(db, draft_id)
     return {"id": draft_id, "deleted": True}
 
 
