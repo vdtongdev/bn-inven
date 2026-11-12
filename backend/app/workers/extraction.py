@@ -2,7 +2,7 @@ import logging
 import time
 from datetime import timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 
 from app.ai.normalization import normalize_extraction_payload
 from app.ai.openrouter import ProviderPermanentError, ProviderTransientError
@@ -34,10 +34,16 @@ def process_one() -> bool:
             job.updated_at = now
             db.commit()
             return True
-        job.status = JobStatus.running
-        job.attempts += 1
-        job.updated_at = now
+        # A queued job can be deleted between selection and claim.
+        claimed = db.execute(update(ExtractionJob).where(
+            ExtractionJob.id == job.id, ExtractionJob.status == job.status,
+            ExtractionJob.attempts == job.attempts,
+        ).values(status=JobStatus.running, attempts=ExtractionJob.attempts + 1,
+                 updated_at=now).execution_options(synchronize_session=False))
         db.commit()
+        if not claimed.rowcount:
+            return True
+        db.refresh(job)
         photo = db.get(ProductPhoto, job.photo_id)
         if photo.draft_id and db.get(ProductDraft, photo.draft_id).review_status == ReviewStatus.excluded:
             job.status = JobStatus.failed

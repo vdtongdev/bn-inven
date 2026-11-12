@@ -2,12 +2,15 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 from PIL import Image
+import pytest
+from sqlalchemy import select
 
 from app.ai.providers import ProviderResult
 from app.core.config import get_settings
 from app.db import SessionLocal
 from app.main import app
-from app.models import ExtractionJob, ProductPhoto
+from app.models import (CatalogItem, DraftAuditEvent, ExtractionJob, ExtractionResult,
+                        JobStatus, ProductDraft, ProductPhoto)
 from app.schemas import ExtractionPayload
 from app.workers.extraction import process_one
 
@@ -98,6 +101,77 @@ def test_excluding_product_removes_its_images_only():
         assert client.patch(f"/api/drafts/{draft_id}", json={"review_status": "Excluded"}).status_code == 200
         assert process_one() is True
         assert process_one() is True
+
+
+def test_removing_working_item_purges_records_and_all_images():
+    with TestClient(app) as client:
+        batch = client.post("/api/batches", json={"name": "Permanent removal"}).json()
+        first = client.post(f"/api/batches/{batch['id']}/photos",
+            files={"file": ("front.png", photo_bytes("orange"), "image/png")}).json()
+        assert process_one()
+        draft_id = client.get(f"/api/jobs/{first['job_id']}").json()["draft_id"]
+        second = client.post(f"/api/batches/{batch['id']}/photos", data={"draft_id": draft_id},
+            files={"file": ("back.png", photo_bytes("purple"), "image/png")}).json()
+        assert process_one()
+        queued = client.post(f"/api/batches/{batch['id']}/photos", data={"draft_id": draft_id},
+            files={"file": ("extra.png", photo_bytes("navy"), "image/png")}).json()
+        assert client.patch(f"/api/drafts/{draft_id}", json={"brand": "Edited"}).status_code == 200
+        photo_ids = [upload["photo_id"] for upload in (first, second, queued)]
+        job_ids = [upload["job_id"] for upload in (first, second, queued)]
+        with SessionLocal() as db:
+            paths = [get_settings().storage_path / db.get(ProductPhoto, pid).filename for pid in photo_ids]
+            result_ids = list(db.scalars(select(ExtractionResult.id).where(ExtractionResult.photo_id.in_(photo_ids))))
+            assert len(result_ids) == 2
+            assert db.scalar(select(DraftAuditEvent.id).where(DraftAuditEvent.draft_id == draft_id))
+        assert client.delete(f"/api/drafts/{draft_id}").status_code == 200
+        assert all(not path.exists() for path in paths)
+        with SessionLocal() as db:
+            assert db.get(ProductDraft, draft_id) is None
+            assert all(db.get(ProductPhoto, pid) is None for pid in photo_ids)
+            assert all(db.get(ExtractionJob, jid) is None for jid in job_ids)
+            assert all(db.get(ExtractionResult, rid) is None for rid in result_ids)
+            assert db.scalar(select(DraftAuditEvent.id).where(DraftAuditEvent.draft_id == draft_id)) is None
+        assert client.get(f"/api/batches/{batch['id']}/drafts").json() == []
+        assert client.delete(f"/api/drafts/{draft_id}").status_code == 404
+        # The same image must create a fresh job and working item after deletion.
+        reupload = client.post(f"/api/batches/{batch['id']}/photos",
+            files={"file": ("again.png", photo_bytes("orange"), "image/png")}).json()
+        assert reupload["job_id"] not in job_ids
+        assert process_one()
+        assert client.get(f"/api/jobs/{reupload['job_id']}").json()["draft_id"] != draft_id
+
+
+@pytest.mark.parametrize("protected", ["running", "approved"])
+def test_removal_preserves_running_or_approved_items(protected):
+    with TestClient(app) as client:
+        batch = client.post("/api/batches", json={"name": "Protected removal"}).json()
+        uploaded = client.post(f"/api/batches/{batch['id']}/photos",
+            files={"file": ("label.png", photo_bytes("pink"), "image/png")}).json()
+        assert process_one()
+        draft_id = client.get(f"/api/jobs/{uploaded['job_id']}").json()["draft_id"]
+        with SessionLocal() as db:
+            path = get_settings().storage_path / db.get(ProductPhoto, uploaded["photo_id"]).filename
+        if protected == "approved":
+            assert client.patch(f"/api/drafts/{draft_id}", json={
+                "product_name": "Reviewed", "item_type": "Goods", "primary_unit": "piece"
+            }).status_code == 200
+            catalog_id = client.post(f"/api/drafts/{draft_id}/approve").json()["matched_catalog_item_id"]
+        else:
+            with SessionLocal() as db:
+                db.get(ExtractionJob, uploaded["job_id"]).status = JobStatus.running
+                db.commit()
+        assert client.delete(f"/api/drafts/{draft_id}").status_code == 409
+        assert path.exists()
+        with SessionLocal() as db:
+            assert db.get(ProductDraft, draft_id) is not None
+            assert db.get(ExtractionJob, uploaded["job_id"]) is not None
+            if protected == "approved":
+                assert db.get(CatalogItem, catalog_id) is not None
+            else:
+                db.get(ExtractionJob, uploaded["job_id"]).status = JobStatus.succeeded
+                db.commit()
+        if protected == "running":
+            assert client.delete(f"/api/drafts/{draft_id}").status_code == 200
 
 
 def test_additional_photo_preserves_human_edits_including_empty_fields(monkeypatch):

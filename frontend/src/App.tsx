@@ -123,9 +123,8 @@ export default function App() {
   }
   async function removeDraft(draft: Draft) {
     try {
-      await api<Draft>(`/api/drafts/${draft.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ review_status: 'Excluded' }),
+      await api<{ deleted: boolean }>(`/api/drafts/${draft.id}`, {
+        method: 'DELETE',
       })
       refreshVersion.current++
       setDrafts(current => current.filter(row => row.id !== draft.id))

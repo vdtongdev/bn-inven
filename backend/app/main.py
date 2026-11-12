@@ -16,14 +16,14 @@ from app.models import (CaptureBatch, DraftAuditEvent, ExportRun, ExtractionJob,
                         ProductPhoto, ReviewStatus)
 from app.schemas import (BatchCreate, DraftAuditEventOut, DraftOut, DraftPatch, ExportCreate,
                          ExportOut, JobOut)
-from app.services import (approve_draft, draft_audit_snapshot, record_draft_audit_event,
+from app.services import (approve_draft, delete_working_draft, draft_audit_snapshot, record_draft_audit_event,
                           save_photo, seed_demo_profile, validate_draft)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("bn_inven.api")
 app = FastAPI(title="BN-Inven API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().allowed_origins,
-                   allow_credentials=True, allow_methods=["GET", "POST", "PATCH"], allow_headers=["*"])
+                   allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["*"])
 
 
 def draft_output(db: Session, draft: ProductDraft) -> dict:
@@ -159,6 +159,12 @@ def update_draft(draft_id: str, payload: DraftPatch, db: Session = Depends(get_d
             logger.exception("Failed to remove images for excluded draft %s", draft.id)
             raise HTTPException(500, "Product excluded, but its images could not be removed; retry removal") from None
     return draft_output(db, draft)
+
+
+@app.delete("/api/drafts/{draft_id}")
+def remove_draft(draft_id: str, db: Session = Depends(get_db)):
+    delete_working_draft(db, draft_id)
+    return {"id": draft_id, "deleted": True}
 
 
 @app.post("/api/drafts/{draft_id}/approve", response_model=DraftOut)

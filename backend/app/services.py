@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -77,6 +77,33 @@ def validate_draft(draft: ProductDraft) -> list[str]:
         if not normalize_text(getattr(draft, field)):
             missing.append(field)
     return missing
+
+
+def delete_working_draft(db: Session, draft_id: str) -> None:
+    # Acquire SQLite's write lock before checking jobs, serializing against worker claims.
+    locked = db.execute(update(ProductDraft).where(ProductDraft.id == draft_id)
+                        .values(updated_at=ProductDraft.updated_at))
+    if not locked.rowcount:
+        raise HTTPException(404, "Draft not found")
+    draft = db.get(ProductDraft, draft_id)
+    if draft.review_status == ReviewStatus.approved:
+        raise HTTPException(409, "Approved catalog items cannot be removed")
+    photos = db.scalars(select(ProductPhoto).where(ProductPhoto.draft_id == draft_id)).all()
+    photo_ids = [photo.id for photo in photos]
+    running = db.scalar(select(ExtractionJob.id).where(
+        ExtractionJob.photo_id.in_(photo_ids), ExtractionJob.status == JobStatus.running).limit(1))
+    if running:
+        raise HTTPException(409, "Recognition is running; retry removal after it finishes")
+    try:
+        for photo in photos:
+            (get_settings().storage_path / photo.filename).unlink(missing_ok=True)
+    except OSError:
+        raise HTTPException(500, "Images could not be fully removed; retry removal") from None
+    # Delete the draft first to release its reference to an extraction result.
+    db.execute(delete(ProductDraft).where(ProductDraft.id == draft_id))
+    # Foreign keys cascade to jobs and results; draft deletion cascades to audit events.
+    db.execute(delete(ProductPhoto).where(ProductPhoto.id.in_(photo_ids)))
+    db.commit()
 
 
 _DRAFT_AUDIT_FIELDS = (
